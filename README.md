@@ -1,4 +1,4 @@
-# LaundryGo — Desktop POS & Shop Management
+# LaundryGo — A Centralized Laundry Management and Automated Notification System
 
 A JavaFX desktop client for a laundry shop: a fast counter workflow for frontline staff and an
 analytics / configuration console for the owner. Built as a single Maven application with a
