@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** Payment ledger — the source of truth for revenue reporting. */
 public final class PaymentDao {
@@ -66,8 +67,31 @@ public final class PaymentDao {
         }
     }
 
-    public double sumBetween(LocalDate from, LocalDate to) {
-        String sql = "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE date(created_at) BETWEEN date(?) AND date(?)";
+    /** Latest settlement recorded against an order — used when reprinting a receipt. */
+    public Optional<Payment> findForOrder(long orderId) {
+        String sql = BASE_SELECT + " WHERE p.order_id = ? ORDER BY p.id DESC LIMIT 1";
+        try (Connection c = Database.open(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, orderId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(new Payment(
+                        rs.getLong("id"),
+                        Times.parse(rs.getString("created_at")),
+                        rs.getString("order_code"),
+                        rs.getString("customer_name"),
+                        PaymentMethod.fromDb(rs.getString("method")),
+                        rs.getDouble("amount"),
+                        rs.getString("reference"),
+                        rs.getString("received_by")));
+            }
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Unable to load the payment", ex);
+        }
+    }
+
+    public double sumBetween(LocalDate from, LocalDate to) {        String sql = "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE date(created_at) BETWEEN date(?) AND date(?)";
         try (Connection c = Database.open(); PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, from.toString());
             ps.setString(2, to.toString());

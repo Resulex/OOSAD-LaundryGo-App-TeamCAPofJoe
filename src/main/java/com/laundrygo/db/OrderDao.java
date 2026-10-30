@@ -49,6 +49,17 @@ public final class OrderDao {
         return query(BASE_SELECT + " WHERE o.id = ?", id).stream().findFirst();
     }
 
+    /** Every order ever logged for a client, newest first — drives the client profile history. */
+    public List<Order> findByCustomer(long customerId) {
+        return query(BASE_SELECT + " WHERE o.customer_id = ? ORDER BY o.created_at DESC", customerId);
+    }
+
+    /** Orders for a client that have not been settled yet. */
+    public int countOpenByCustomer(long customerId) {
+        return count("SELECT COUNT(*) FROM orders WHERE customer_id = " + customerId
+                + " AND status <> 'COMPLETED'");
+    }
+
     public long insert(long customerId,
                        long serviceTypeId,
                        double weight,

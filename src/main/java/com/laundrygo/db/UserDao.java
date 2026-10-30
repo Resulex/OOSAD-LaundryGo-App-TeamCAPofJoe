@@ -19,11 +19,13 @@ public final class UserDao {
 
     /** Stored credentials for a single account — only the auth flow should touch this. */
     public record Credential(long id, String username, String fullName, Role role, boolean active,
-                             String hash, String salt) {
+                             String shift, String hash, String salt) {
     }
 
     public Optional<Credential> credentials(String username) {
-        String sql = "SELECT id, username, full_name, role, active, password_hash, salt FROM users WHERE username = ?";
+        String sql = """
+                SELECT id, username, full_name, role, active, shift, password_hash, salt
+                  FROM users WHERE username = ?""";
         try (Connection c = Database.open(); PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, username);
             try (ResultSet rs = ps.executeQuery()) {
@@ -36,6 +38,7 @@ public final class UserDao {
                         rs.getString("full_name"),
                         Role.fromDb(rs.getString("role")),
                         rs.getInt("active") == 1,
+                        text(rs.getString("shift")),
                         rs.getString("password_hash"),
                         rs.getString("salt")));
             }
@@ -45,7 +48,9 @@ public final class UserDao {
     }
 
     public List<User> findAll() {
-        String sql = "SELECT id, username, full_name, role, active FROM users ORDER BY role, full_name";
+        String sql = """
+                SELECT id, username, full_name, role, active, shift
+                  FROM users ORDER BY role, full_name""";
         List<User> users = new ArrayList<>();
         try (Connection c = Database.open();
              PreparedStatement ps = c.prepareStatement(sql);
@@ -56,7 +61,8 @@ public final class UserDao {
                         rs.getString("username"),
                         rs.getString("full_name"),
                         Role.fromDb(rs.getString("role")),
-                        rs.getInt("active") == 1));
+                        rs.getInt("active") == 1,
+                        text(rs.getString("shift"))));
             }
             return users;
         } catch (SQLException ex) {
@@ -64,11 +70,33 @@ public final class UserDao {
         }
     }
 
+    /** Updates the profile fields the owner is allowed to change on an existing account. */
+    public void updateProfile(long id, String fullName, Role role, String shift) {
+        String sql = "UPDATE users SET full_name = ?, role = ?, shift = ? WHERE id = ?";
+        try (Connection c = Database.open(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, fullName);
+            ps.setString(2, role.name());
+            ps.setString(3, shift == null ? "" : shift);
+            ps.setLong(4, id);
+            ps.executeUpdate();
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Unable to update the account", ex);
+        }
+    }
+
+    private static String text(String value) {
+        return value == null ? "" : value;
+    }
+
     public long create(String fullName, String username, String password, Role role) {
+        return create(fullName, username, password, role, "");
+    }
+
+    public long create(String fullName, String username, String password, Role role, String shift) {
         String salt = PasswordHasher.newSalt();
         String sql = """
-                INSERT INTO users(username, full_name, password_hash, salt, role, active, created_at)
-                VALUES (?,?,?,?,?,1,?)""";
+                INSERT INTO users(username, full_name, password_hash, salt, role, active, shift, created_at)
+                VALUES (?,?,?,?,?,1,?,?)""";
         try (Connection c = Database.open();
              PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, username);
@@ -76,7 +104,8 @@ public final class UserDao {
             ps.setString(3, PasswordHasher.hash(password, salt));
             ps.setString(4, salt);
             ps.setString(5, role.name());
-            ps.setString(6, Times.stamp(LocalDateTime.now()));
+            ps.setString(6, shift == null ? "" : shift);
+            ps.setString(7, Times.stamp(LocalDateTime.now()));
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 return keys.next() ? keys.getLong(1) : -1;

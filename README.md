@@ -83,7 +83,11 @@ Both accounts also appear as one-click chips on the login screen.
 * Status is a custom cell (grey pending, blue in-progress, green ready, red overdue) and overdue
   rows get a soft red wash plus a bold red due date.
 * Double-clicking a row opens the order profile; the sidebar filters the queue by state.
-* Sidebar nav: Counter desk · Ready for pickup · In progress · Overdue, plus log out.
+* **Client directory** (sidebar → Clients, or the quick panel) searches by name or mobile number and
+  shows the selected client's profile — contact details, client since, orders logged, open orders and
+  lifetime paid — plus their full order history. From there the counter can edit the profile, delete
+  it (soft delete: settled orders stay in reporting) or start a new order for that client.
+* Sidebar nav: Counter desk · Ready for pickup · In progress · Overdue · Client directory, plus log out.
 
 ### 3. Log new order (modal)
 
@@ -108,6 +112,9 @@ Both accounts also appear as one-click chips on the login screen.
   showing the chargeable days and the per-day rate.
 * Cash tab shows the change due as you type; GCash tab requires a reference number. Processing
   payment writes the ledger row, completes the order and removes it from the queue.
+* Settlement opens the **receipt** (order, client, service, base cost, late fee, total, amount paid,
+  change, method, reference, cashier). **Print receipt** sends a fresh copy of the paper node to the
+  system print dialog, and settled orders can be reprinted later from the client's order history.
 
 ### 5. Owner dashboard
 
@@ -123,7 +130,43 @@ Both accounts also appear as one-click chips on the login screen.
 | ![Penalty settings](docs/screenshots/06-penalty-settings.png) | ![Revenue report](docs/screenshots/07-revenue-report.png) |
 
 * Penalty dialog previews the effect of the rate/grace/cap before saving.
-* Revenue report filters by date range, totals the range and exports CSV.
+* Revenue report filters by date range, totals the range, exports CSV and prints a paginated PDF-ready
+  sheet (24 transactions per page) through the system print dialog.
+* Staff accounts support create, **edit profile** (full name, role, shift), password reset and
+  activation/deactivation, each written to the audit log.
+
+---
+
+## Use case coverage
+
+| Use case | Actor | Status | Where |
+| --- | --- | --- | --- |
+| Login | Staff / Owner | Covered | `LoginView` → `AuthService` |
+| Logout | Staff / Owner | Covered | sidebar log out, audit `LOGOUT` |
+| View customer profile | Staff | Covered | `CustomerDirectoryDialog` profile card |
+| Register customer profile | Staff | Covered | `CustomerFormDialog` (create) |
+| Edit customer profile | Staff | Covered | `CustomerFormDialog` (edit) → `CustomerDao.update` |
+| Delete customer profile | Staff | Covered | directory → archive (soft delete, blocked while orders are open) |
+| Process payment | Staff | Covered | `OrderProfileDialog` → `OrderService.processPayment` |
+| Log order | Staff | Covered | `NewOrderDialog` → `OrderService.createOrder` |
+| Update laundry status | Staff | Covered | `OrderProfileDialog` status tracker |
+| Search customer profile | Staff | Covered | directory search (name / mobile), live table + history |
+| Print receipt | Staff | Covered | `ReceiptDialog` after settlement, reprint from client history |
+| Search order | Staff | Partial | queue search covers active orders only; settled orders are found via the client's history |
+| View daily metrics | Owner | Covered | `AdminDashboardView` stat cards + tabs |
+| Generate revenue report | Owner | Covered | `RevenueReportDialog` (date range) |
+| Configure penalty rates | Owner | Covered | `PenaltySettingsDialog` → `PenaltyService` |
+| Define service type | Owner | Covered | `ServiceTypesDialog` create / update / retire |
+| Create staff account | Owner | Covered | `StaffAccountsDialog` → `UserDao.create` |
+| View staff account | Owner | Covered | accounts table (name, username, role, shift, status) |
+| Edit staff account | Owner | Covered | "Save changes" → `UserDao.updateProfile` (name, role, shift) |
+| Deactivate staff account | Owner | Covered | "Activate / deactivate" → `UserDao.setActive` |
+| Reset user account | Owner | Partial | password reset is implemented; there is no lockout counter to unlock |
+| View audit logs | Owner | Covered | audit tab → `AuditDao.recent` |
+| Print report | Owner | Covered | "Print report" in the revenue dialog (`PrintSupport`, paginated) |
+| Download report | Owner | Partial | CSV export implemented; no PDF writer |
+| Trigger SMS alert | System | Partial | fired on the Ready transition; `SmsService` is a simulated gateway stub |
+| Apply late fee | System | Covered | `OrderDao.flagOverdue` on dashboard load + manual Overdue transition |
 
 ---
 
@@ -178,8 +221,10 @@ src/main/java/com/laundrygo/
     ├── StaffDashboardView.java
     ├── AdminDashboardView.java
     ├── component/             # AppSidebar, StatCard, StatusBadge, Toast
-    └── dialog/                # NewOrder, OrderProfile, CustomerForm, PenaltySettings,
-                               # ServiceTypes, StaffAccounts, RevenueReport
+    ├── PrintSupport.java      # lays out + scales printable nodes, drives PrinterJob
+    └── dialog/                # NewOrder, OrderProfile, Receipt, CustomerForm,
+                              # CustomerDirectory, PenaltySettings, ServiceTypes,
+                              # StaffAccounts, RevenueReport
 src/main/resources/com/laundrygo/app.css   # design tokens + component styling
 ```
 

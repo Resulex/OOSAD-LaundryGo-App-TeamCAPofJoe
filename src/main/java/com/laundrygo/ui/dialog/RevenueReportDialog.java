@@ -2,6 +2,7 @@ package com.laundrygo.ui.dialog;
 
 import com.laundrygo.model.Payment;
 import com.laundrygo.service.AppServices;
+import com.laundrygo.ui.PrintSupport;
 import com.laundrygo.ui.Ui;
 import com.laundrygo.util.Money;
 import com.laundrygo.util.Times;
@@ -10,11 +11,15 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DatePicker;
@@ -73,6 +78,9 @@ public final class RevenueReportDialog extends Dialog<Boolean> {
         Button export = Ui.button("Export CSV", "secondary-button");
         export.setOnAction(event -> exportCsv());
 
+        Button print = Ui.button("Print report", "ghost-button");
+        print.setOnAction(event -> printReport());
+
         HBox filters = new HBox(12,
                 new VBox(6, Ui.fieldLabel("From"), from),
                 new VBox(6, Ui.fieldLabel("To"), to),
@@ -88,7 +96,7 @@ public final class RevenueReportDialog extends Dialog<Boolean> {
         card.getStyleClass().add("card");
         VBox.setVgrow(card, Priority.ALWAYS);
 
-        HBox actions = new HBox(10, Ui.hSpacer(), export);
+        HBox actions = new HBox(10, Ui.hSpacer(), print, export);
         actions.setAlignment(Pos.CENTER_RIGHT);
 
         VBox body = new VBox(16, new VBox(4, title, subtitle), filters, card, actions);
@@ -149,6 +157,81 @@ public final class RevenueReportDialog extends Dialog<Boolean> {
         double total = rows.stream().mapToDouble(Payment::amount).sum();
         totalLabel.setText(Money.format(total));
         countLabel.setText(rows.size() + " transaction(s) between " + fromDate + " and " + toDate);
+    }
+
+    // ------------------------------------------------------------------ printing
+
+    private void printReport() {
+        List<Payment> rows = new ArrayList<>(data);
+        if (rows.isEmpty()) {
+            Ui.info(getOwner(), "Nothing to print", "Run a report with at least one transaction first.");
+            return;
+        }
+        LocalDate fromDate = from.getValue() == null ? LocalDate.now().minusDays(7) : from.getValue();
+        LocalDate toDate = to.getValue() == null ? LocalDate.now() : to.getValue();
+        String range = fromDate + "  to  " + toDate;
+        double total = rows.stream().mapToDouble(Payment::amount).sum();
+
+        int perPage = 24;
+        int pageCount = (rows.size() + perPage - 1) / perPage;
+        List<Node> pages = new ArrayList<>(pageCount);
+        for (int index = 0; index < pageCount; index++) {
+            int start = index * perPage;
+            int end = Math.min(rows.size(), start + perPage);
+            pages.add(buildPrintPage(rows.subList(start, end), range, total, rows.size(),
+                    index + 1, pageCount));
+        }
+        PrintSupport.print(getOwner(), "LaundryGo revenue report", pages);
+    }
+
+    /** One printed page: repeated header, at most {@code perPage} rows and a page footer. */
+    private Node buildPrintPage(List<Payment> slice, String range, double total, int count,
+                                int page, int pages) {
+        VBox table = new VBox(4, printLine(true,
+                "Date & time", "Order", "Client", "Method", "Reference", "Amount"));
+        for (Payment payment : slice) {
+            table.getChildren().add(printLine(false,
+                    Times.display(payment.at()),
+                    payment.orderCode(),
+                    payment.customerName(),
+                    payment.method().displayName(),
+                    payment.reference() == null || payment.reference().isBlank() ? "—" : payment.reference(),
+                    Money.format(payment.amount())));
+        }
+
+        Label footer = Ui.label("Generated " + Times.display(LocalDateTime.now())
+                + "   ·   page " + page + " of " + pages, "print-meta");
+
+        VBox sheet = new VBox(12,
+                new VBox(3,
+                        Ui.label("LaundryGo — revenue report", "print-title"),
+                        Ui.label(range + "   ·   " + count + " transaction(s)   ·   total "
+                                + Money.format(total), "print-meta")),
+                Ui.divider(),
+                table,
+                Ui.divider(),
+                footer);
+        sheet.getStyleClass().add("print-page");
+        sheet.setPadding(new Insets(30, 34, 30, 34));
+        sheet.setPrefWidth(700);
+        return sheet;
+    }
+
+    private HBox printLine(boolean header, String... cells) {
+        double[] widths = {150, 78, 168, 70, 120, 96};
+        HBox row = new HBox(10);
+        row.setAlignment(Pos.CENTER_LEFT);
+        for (int i = 0; i < cells.length; i++) {
+            Label label = Ui.label(cells[i], header ? "print-head" : "print-cell");
+            label.setPrefWidth(widths[i]);
+            label.setMinWidth(widths[i]);
+            label.setMaxWidth(widths[i]);
+            if (i == cells.length - 1) {
+                label.setAlignment(Pos.CENTER_RIGHT);
+            }
+            row.getChildren().add(label);
+        }
+        return row;
     }
 
     private void exportCsv() {

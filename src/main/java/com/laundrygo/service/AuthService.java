@@ -30,7 +30,7 @@ public final class AuthService {
             return Optional.empty();
         }
         User user = new User(credential.id(), credential.username(), credential.fullName(),
-                credential.role(), true);
+                credential.role(), true, credential.shift());
         audit.log(user.getUsername(), "LOGIN", user.getFullName() + " signed in as "
                 + user.getRole().displayName());
         return Optional.of(user);

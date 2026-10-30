@@ -10,13 +10,19 @@ public final class User {
     private final String fullName;
     private final Role role;
     private final boolean active;
+    private final String shift;
 
     public User(long id, String username, String fullName, Role role, boolean active) {
+        this(id, username, fullName, role, active, "");
+    }
+
+    public User(long id, String username, String fullName, Role role, boolean active, String shift) {
         this.id = id;
         this.username = Objects.requireNonNull(username, "username");
         this.fullName = Objects.requireNonNull(fullName, "fullName");
         this.role = Objects.requireNonNull(role, "role");
         this.active = active;
+        this.shift = shift == null ? "" : shift;
     }
 
     public long getId() {
@@ -37,5 +43,10 @@ public final class User {
 
     public boolean isActive() {
         return active;
+    }
+
+    /** Assigned shift label ("Morning", "Afternoon", …) or an empty string when unassigned. */
+    public String getShift() {
+        return shift;
     }
 }
