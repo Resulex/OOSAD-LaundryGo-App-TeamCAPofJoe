@@ -7,6 +7,7 @@ import com.laundrygo.service.AppServices;
 import com.laundrygo.ui.component.AppSidebar;
 import com.laundrygo.ui.component.StatusBadge;
 import com.laundrygo.ui.component.Toast;
+import com.laundrygo.ui.dialog.CustomerDirectoryDialog;
 import com.laundrygo.ui.dialog.CustomerFormDialog;
 import com.laundrygo.ui.dialog.NewOrderDialog;
 import com.laundrygo.ui.dialog.OrderProfileDialog;
@@ -59,6 +60,8 @@ public final class StaffDashboardView {
     private TableView<Order> table;
     private TextField searchField;
     private Predicate<Order> queueFilter = order -> true;
+    private AppSidebar sidebar;
+    private Button deskNav;
 
     public StaffDashboardView(AppNavigator nav, User user) {
         this.nav = nav;
@@ -92,20 +95,23 @@ public final class StaffDashboardView {
     }
 
     private AppSidebar buildSidebar() {
-        AppSidebar sidebar = new AppSidebar("Counter desk", user, this::logout);
+        sidebar = new AppSidebar("Counter desk", user, this::logout);
 
-        Button desk = sidebar.addNavItem("Counter desk", () -> applyQueueFilter(order -> true));
+        deskNav = sidebar.addNavItem("Counter desk", () -> applyQueueFilter(order -> true));
         sidebar.addNavItem("Ready for pickup", () -> applyQueueFilter(order -> order.getStatus() == OrderStatus.READY));
         sidebar.addNavItem("In progress", () -> applyQueueFilter(order -> order.getStatus() == OrderStatus.IN_PROGRESS));
         sidebar.addNavItem("Overdue", () -> applyQueueFilter(order -> order.getStatus() == OrderStatus.OVERDUE));
-        sidebar.activate(desk);
+
+        sidebar.addSection("Clients");
+        sidebar.addNavItem("Client directory", this::openClients);
+        sidebar.activate(deskNav);
 
         return sidebar;
     }
 
     private VBox buildHeader() {
         Label title = Ui.label("Counter desk", "page-title");
-        Label subtitle = Ui.label(Times.HEADER_DATE.format(LocalDate.now()) + "  ·  " + shiftLabel() + " shift",
+        Label subtitle = Ui.label(Times.HEADER_DATE.format(LocalDate.now()) + "  ·  " + shiftText(),
                 "page-subtitle");
 
         searchField = new TextField();
@@ -283,6 +289,10 @@ public final class StaffDashboardView {
         register.setMaxWidth(Double.MAX_VALUE);
         register.setOnAction(event -> registerWalkIn());
 
+        Button directory = Ui.button("Client directory", "ghost-button");
+        directory.setMaxWidth(Double.MAX_VALUE);
+        directory.setOnAction(event -> openClients());
+
         Button openSelected = Ui.button("Open selected order", "ghost-button");
         openSelected.setMaxWidth(Double.MAX_VALUE);
         openSelected.setOnAction(event -> {
@@ -298,6 +308,7 @@ public final class StaffDashboardView {
                 Ui.label("Quick actions", "card-title"),
                 logNew,
                 register,
+                directory,
                 openSelected);
         actions.getStyleClass().add("card");
 
@@ -406,9 +417,17 @@ public final class StaffDashboardView {
     }
 
     private void registerWalkIn() {
-        CustomerFormDialog dialog = new CustomerFormDialog(nav.stage(), services);
+        CustomerFormDialog dialog = new CustomerFormDialog(nav.stage(), services, user.getUsername());
         dialog.showAndWait().ifPresent(customer ->
                 Toast.show(root, "Client " + customer.name() + " added to the directory.", Toast.Kind.SUCCESS));
+    }
+
+    private void openClients() {
+        new CustomerDirectoryDialog(nav.stage(), services, user).showAndWait();
+        if (sidebar != null && deskNav != null) {
+            sidebar.activate(deskNav);
+        }
+        refresh();
     }
 
     private void openOrder(Order order) {
@@ -431,5 +450,14 @@ public final class StaffDashboardView {
             return "morning";
         }
         return hour < 18 ? "afternoon" : "evening";
+    }
+
+    /** Prefers the shift assigned by the owner, falling back to the current time of day. */
+    private String shiftText() {
+        String assigned = user.getShift();
+        if (assigned != null && !assigned.isBlank()) {
+            return assigned + " shift";
+        }
+        return shiftLabel() + " shift";
     }
 }

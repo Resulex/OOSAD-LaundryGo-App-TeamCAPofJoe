@@ -34,6 +34,7 @@ public final class Database {
                 salt          TEXT NOT NULL,
                 role          TEXT NOT NULL,
                 active        INTEGER NOT NULL DEFAULT 1,
+                shift         TEXT NOT NULL DEFAULT '',
                 created_at    TEXT NOT NULL
             )""",
             """
@@ -41,6 +42,7 @@ public final class Database {
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 name       TEXT NOT NULL,
                 phone      TEXT NOT NULL,
+                archived   INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             )""",
             """
@@ -109,10 +111,38 @@ public final class Database {
             for (String ddl : SCHEMA) {
                 statement.execute(ddl);
             }
+            migrate(connection);
             seed(connection);
             ready = true;
         } catch (SQLException ex) {
             throw new IllegalStateException("Unable to initialise the LaundryGo database", ex);
+        }
+    }
+
+    /**
+     * Brings databases created by older builds up to date. {@code CREATE TABLE IF NOT EXISTS} never
+     * touches an existing table, so new columns are added here instead.
+     */
+    private static void migrate(Connection c) throws SQLException {
+        addColumnIfMissing(c, "customers", "archived", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(c, "users", "shift", "TEXT NOT NULL DEFAULT ''");
+    }
+
+    private static void addColumnIfMissing(Connection c, String table, String column, String definition)
+            throws SQLException {
+        boolean present = false;
+        try (Statement st = c.createStatement(); ResultSet rs = st.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (rs.next()) {
+                if (column.equalsIgnoreCase(rs.getString("name"))) {
+                    present = true;
+                    break;
+                }
+            }
+        }
+        if (!present) {
+            try (Statement st = c.createStatement()) {
+                st.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            }
         }
     }
 
@@ -135,9 +165,9 @@ public final class Database {
 
         LocalDateTime now = LocalDateTime.now();
 
-        insertUser(c, "admin", "Ana Reyes", "admin123", Role.ADMIN);
-        insertUser(c, "staff", "Mika Santos", "staff123", Role.STAFF);
-        insertUser(c, "joel", "Joel Ramos", "staff123", Role.STAFF);
+        insertUser(c, "admin", "Ana Reyes", "admin123", Role.ADMIN, "Flexible");
+        insertUser(c, "staff", "Mika Santos", "staff123", Role.STAFF, "Morning");
+        insertUser(c, "joel", "Joel Ramos", "staff123", Role.STAFF, "Afternoon");
 
         setSetting(c, "penalty_per_day", "20");
         setSetting(c, "grace_days", "1");
@@ -237,19 +267,20 @@ public final class Database {
         }
     }
 
-    private static long insertUser(Connection c, String username, String fullName, String password, Role role)
-            throws SQLException {
+    private static long insertUser(Connection c, String username, String fullName, String password,
+                                   Role role, String shift) throws SQLException {
         String salt = PasswordHasher.newSalt();
         String sql = """
-                INSERT INTO users(username, full_name, password_hash, salt, role, active, created_at)
-                VALUES (?,?,?,?,?,1,?)""";
+                INSERT INTO users(username, full_name, password_hash, salt, role, active, shift, created_at)
+                VALUES (?,?,?,?,?,1,?,?)""";
         try (PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, username);
             ps.setString(2, fullName);
             ps.setString(3, PasswordHasher.hash(password, salt));
             ps.setString(4, salt);
             ps.setString(5, role.name());
-            ps.setString(6, Times.stamp(LocalDateTime.now()));
+            ps.setString(6, shift == null ? "" : shift);
+            ps.setString(7, Times.stamp(LocalDateTime.now()));
             ps.executeUpdate();
             return generatedKey(ps);
         }

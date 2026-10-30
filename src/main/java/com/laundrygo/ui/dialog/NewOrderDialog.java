@@ -41,6 +41,7 @@ public final class NewOrderDialog extends Dialog<Order> {
 
     private final AppServices services;
     private final User actor;
+    private final Customer preselected;
 
     private final ComboBox<Customer> customerBox = new ComboBox<>();
     private final ObservableList<Customer> customerItems = FXCollections.observableArrayList();
@@ -57,8 +58,13 @@ public final class NewOrderDialog extends Dialog<Order> {
     private Order created;
 
     public NewOrderDialog(Window owner, AppServices services, User actor) {
+        this(owner, services, actor, null);
+    }
+
+    public NewOrderDialog(Window owner, AppServices services, User actor, Customer preselected) {
         this.services = services;
         this.actor = actor;
+        this.preselected = preselected;
 
         initOwner(owner);
         initModality(Modality.APPLICATION_MODAL);
@@ -123,7 +129,7 @@ public final class NewOrderDialog extends Dialog<Order> {
 
         Button newClient = Ui.button("+ New client", "ghost-button");
         newClient.setOnAction(event -> {
-            CustomerFormDialog dialog = new CustomerFormDialog(getOwner(), services);
+            CustomerFormDialog dialog = new CustomerFormDialog(getOwner(), services, actor.getUsername());
             dialog.showAndWait().ifPresent(customer -> {
                 loadData();
                 customerBox.setValue(customer);
@@ -132,6 +138,11 @@ public final class NewOrderDialog extends Dialog<Order> {
             });
         });
         HBox.setHgrow(customerBox, Priority.ALWAYS);
+
+        if (preselected != null) {
+            customerBox.setValue(preselected);
+            customerBox.getEditor().setText(preselected.displayLabel());
+        }
 
         // --- order details ---------------------------------------------------
         serviceBox.setMaxWidth(Double.MAX_VALUE);

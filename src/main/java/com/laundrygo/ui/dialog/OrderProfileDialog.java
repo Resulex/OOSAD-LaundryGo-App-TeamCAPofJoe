@@ -2,7 +2,9 @@ package com.laundrygo.ui.dialog;
 
 import com.laundrygo.model.Order;
 import com.laundrygo.model.OrderStatus;
+import com.laundrygo.model.Payment;
 import com.laundrygo.model.PaymentMethod;
+import com.laundrygo.model.Receipt;
 import com.laundrygo.model.User;
 import com.laundrygo.service.AppServices;
 import com.laundrygo.ui.Ui;
@@ -10,10 +12,10 @@ import com.laundrygo.util.Money;
 import com.laundrygo.util.Times;
 import java.time.LocalDateTime;
 import java.util.Locale;
+import java.util.Optional;
 import javafx.concurrent.Task;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
@@ -61,6 +63,7 @@ public final class OrderProfileDialog extends Dialog<Boolean> {
 
     private boolean suppressStatusEvents;
     private boolean paymentRecorded;
+    private double changeDue;
 
     public OrderProfileDialog(Window owner, AppServices services, User actor, Order order) {
         this.services = services;
@@ -247,11 +250,18 @@ public final class OrderProfileDialog extends Dialog<Boolean> {
         pay.setDisable(order.getStatus() == OrderStatus.COMPLETED);
         pay.setOnAction(event -> processPayment());
 
+        Button reprint = Ui.button("Print receipt", "secondary-button");
+        reprint.setMaxWidth(Double.MAX_VALUE);
+        reprint.setVisible(order.getStatus() == OrderStatus.COMPLETED);
+        reprint.setManaged(order.getStatus() == OrderStatus.COMPLETED);
+        reprint.setOnAction(event -> reprintReceipt());
+
         VBox card = new VBox(10,
                 Ui.label("Payment", "card-title"),
                 tabs,
                 paymentError,
                 pay,
+                reprint,
                 Ui.label("Settling the balance completes the order and removes it from the active queue.",
                         "hint"));
         card.getStyleClass().add("card");
@@ -390,6 +400,7 @@ public final class OrderProfileDialog extends Dialog<Boolean> {
                 return;
             }
             amount = balance > 0 ? balance : received;
+            changeDue = Math.max(0, received - amount);
         } else {
             method = PaymentMethod.GCASH;
             reference = gcashRef.getText() == null ? "" : gcashRef.getText().trim().toUpperCase(Locale.ROOT);
@@ -407,15 +418,41 @@ public final class OrderProfileDialog extends Dialog<Boolean> {
                 return;
             }
             amount = balance > 0 ? balance : entered;
+            changeDue = 0;
         }
 
         try {
             services.orderService().processPayment(order, method, amount, reference, actor);
             paymentRecorded = true;
+            new ReceiptDialog(getDialogPane().getScene().getWindow(), receiptFor(method, amount, reference,
+                    changeDue, order.getCompletedAt() == null ? LocalDateTime.now() : order.getCompletedAt()))
+                    .showAndWait();
             close();
         } catch (RuntimeException ex) {
             showPaymentError(ex.getMessage());
         }
+    }
+
+    /** Rebuilds the receipt from the ledger so a settled order can be reprinted at any time. */
+    private void reprintReceipt() {
+        Window owner = getDialogPane().getScene().getWindow();
+        Optional<Payment> latest = services.payments().findForOrder(order.getId());
+        if (latest.isEmpty()) {
+            Ui.info(owner, "No payment on file",
+                    "This order has no recorded settlement yet, so there is no receipt to print.");
+            return;
+        }
+        Payment payment = latest.get();
+        new ReceiptDialog(owner, receiptFor(payment.method(), payment.amount(), payment.reference(), 0,
+                payment.at() == null ? LocalDateTime.now() : payment.at())).showAndWait();
+    }
+
+    private Receipt receiptFor(PaymentMethod method, double paid, String reference, double change,
+                               LocalDateTime settledAt) {
+        return new Receipt(order.getCode(), order.getCustomerName(), order.getCustomerPhone(),
+                order.getServiceName(), order.getWeightLabel(), order.getUnitPrice(), order.getBaseCost(),
+                order.getLateFee(), order.getTotal(), paid, change, method, reference,
+                actor.getUsername(), settledAt);
     }
 
     private void showPaymentError(String message) {

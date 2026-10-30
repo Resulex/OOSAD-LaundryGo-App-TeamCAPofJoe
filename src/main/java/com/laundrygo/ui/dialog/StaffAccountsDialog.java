@@ -28,6 +28,8 @@ import javafx.stage.Window;
 /** Owner configuration: staff accounts and access. */
 public final class StaffAccountsDialog extends Dialog<Boolean> {
 
+    private static final String[] SHIFTS = {"Morning", "Afternoon", "Evening", "Flexible"};
+
     private final AppServices services;
     private final User actor;
 
@@ -38,6 +40,7 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
     private final TextField usernameField = new TextField();
     private final PasswordField passwordField = new PasswordField();
     private final ComboBox<Role> roleBox = new ComboBox<>();
+    private final ComboBox<String> shiftBox = new ComboBox<>();
     private final Label error = Ui.label("", "error-text");
 
     private User selected;
@@ -54,7 +57,7 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
 
         DialogPane pane = getDialogPane();
         Ui.styleDialog(pane);
-        pane.setPrefSize(900, 620);
+        pane.setPrefSize(940, 660);
         pane.getButtonTypes().add(ButtonType.CLOSE);
         pane.setContent(buildContent());
 
@@ -91,8 +94,17 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
         error.setManaged(false);
         error.setVisible(false);
 
+        shiftBox.getItems().setAll(SHIFTS);
+        shiftBox.setValue("Flexible");
+        shiftBox.setMaxWidth(Double.MAX_VALUE);
+
         Button create = Ui.button("Create account", "primary-button");
+        create.setMaxWidth(Double.MAX_VALUE);
         create.setOnAction(event -> createAccount());
+
+        Button saveChanges = Ui.button("Save changes", "secondary-button");
+        saveChanges.setMaxWidth(Double.MAX_VALUE);
+        saveChanges.setOnAction(event -> updateDetails());
 
         Button reset = Ui.button("Reset password", "ghost-button");
         reset.setOnAction(event -> resetPassword());
@@ -100,18 +112,23 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
         Button toggle = Ui.button("Activate / deactivate", "ghost-button");
         toggle.setOnAction(event -> toggleActive());
 
+        Button clear = Ui.button("Clear form", "link-button");
+        clear.setOnAction(event -> clearForm());
+
         VBox form = new VBox(10,
                 Ui.label("Account editor", "section-title"),
                 new VBox(6, Ui.fieldLabel("Full name"), fullNameField),
                 new VBox(6, Ui.fieldLabel("Username"), usernameField),
                 new VBox(6, Ui.fieldLabel("Password"), passwordField),
                 new VBox(6, Ui.fieldLabel("Role"), roleBox),
+                new VBox(6, Ui.fieldLabel("Shift"), shiftBox),
                 error,
                 create,
-                new HBox(8, reset, toggle));
+                saveChanges,
+                new HBox(8, reset, toggle, Ui.hSpacer(), clear));
         form.getStyleClass().add("card");
-        form.setPrefWidth(310);
-        form.setMinWidth(310);
+        form.setPrefWidth(330);
+        form.setMinWidth(330);
         ((HBox) form.getChildren().get(form.getChildren().size() - 1)).setAlignment(Pos.CENTER_LEFT);
 
         VBox tableCard = new VBox(10, Ui.label("Accounts", "card-title"), table);
@@ -141,16 +158,23 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
         username.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue().getUsername()));
 
         TableColumn<User, String> role = new TableColumn<>("Role");
-        role.setPrefWidth(150);
+        role.setPrefWidth(140);
         role.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(
                 cell.getValue().getRole().displayName()));
 
+        TableColumn<User, String> shift = new TableColumn<>("Shift");
+        shift.setPrefWidth(95);
+        shift.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(
+                cell.getValue().getShift() == null || cell.getValue().getShift().isBlank()
+                        ? "—"
+                        : cell.getValue().getShift()));
+
         TableColumn<User, String> status = new TableColumn<>("Status");
-        status.setPrefWidth(110);
+        status.setPrefWidth(90);
         status.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(
                 cell.getValue().isActive() ? "Active" : "Disabled"));
 
-        table.getColumns().addAll(name, username, role, status);
+        table.getColumns().addAll(name, username, role, shift, status);
 
         table.setRowFactory(tv -> {
             TableRow<User> row = new TableRow<>();
@@ -160,6 +184,9 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
                     fullNameField.setText(selected.getFullName());
                     usernameField.setText(selected.getUsername());
                     roleBox.setValue(selected.getRole());
+                    shiftBox.setValue(selected.getShift() == null || selected.getShift().isBlank()
+                            ? "Flexible"
+                            : selected.getShift());
                     passwordField.clear();
                     hideError();
                 }
@@ -170,6 +197,64 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
 
     private void reload() {
         data.setAll(services.users().findAll());
+    }
+
+    /** Updates the editable profile of the selected account (name, role and shift). */
+    private void updateDetails() {
+        if (selected == null) {
+            showError("Select an account in the table first.");
+            return;
+        }
+        String fullName = fullNameField.getText() == null ? "" : fullNameField.getText().trim();
+        if (fullName.length() < 2) {
+            showError("Enter the staff member's full name.");
+            return;
+        }
+        Role role = roleBox.getValue() == null ? selected.getRole() : roleBox.getValue();
+        if (selected.getId() == actor.getId() && role != Role.ADMIN) {
+            showError("You cannot remove your own owner access.");
+            return;
+        }
+        String shift = shiftBox.getValue() == null ? "" : shiftBox.getValue();
+        try {
+            services.users().updateProfile(selected.getId(), fullName, role, shift);
+            services.audit().log(actor.getUsername(), "ACCOUNT_UPDATED",
+                    selected.getUsername() + " · " + fullName + " · " + role.displayName()
+                            + " · " + shift + " shift");
+            changed = true;
+            long id = selected.getId();
+            reload();
+            selectById(id);
+            hideError();
+            Ui.info(getOwner(), "Account updated", fullName + "'s profile has been saved.");
+        } catch (RuntimeException ex) {
+            showError(ex.getMessage());
+        }
+    }
+
+    private void selectById(long id) {
+        data.stream().filter(user -> user.getId() == id).findFirst().ifPresent(user -> {
+            table.getSelectionModel().select(user);
+            selected = user;
+            fullNameField.setText(user.getFullName());
+            usernameField.setText(user.getUsername());
+            roleBox.setValue(user.getRole());
+            shiftBox.setValue(user.getShift() == null || user.getShift().isBlank()
+                    ? "Flexible"
+                    : user.getShift());
+            passwordField.clear();
+        });
+    }
+
+    private void clearForm() {
+        selected = null;
+        table.getSelectionModel().clearSelection();
+        fullNameField.clear();
+        usernameField.clear();
+        passwordField.clear();
+        roleBox.setValue(Role.STAFF);
+        shiftBox.setValue("Flexible");
+        hideError();
     }
 
     private void createAccount() {
@@ -195,14 +280,16 @@ public final class StaffAccountsDialog extends Dialog<Boolean> {
         }
 
         try {
-            services.users().create(fullName, username, password, roleBox.getValue());
+            services.users().create(fullName, username, password, roleBox.getValue(), shiftBox.getValue());
             services.audit().log(actor.getUsername(), "ACCOUNT_CREATED",
-                    fullName + " (" + username + ") as " + roleBox.getValue().displayName());
+                    fullName + " (" + username + ") as " + roleBox.getValue().displayName()
+                            + " · " + shiftBox.getValue() + " shift");
             changed = true;
             reload();
             fullNameField.clear();
             usernameField.clear();
             passwordField.clear();
+            shiftBox.setValue("Flexible");
             hideError();
         } catch (RuntimeException ex) {
             showError(ex.getMessage());

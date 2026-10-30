@@ -95,6 +95,31 @@ public final class SmokeTest {
         expect("penalty settings persist", Math.abs(services.penalty().perDay() - 35) < 0.001);
         services.penalty().update(20, 1, 100);
 
+        // --- client directory: view, edit, archive ---------------------------
+        Customer profile = services.customers().findById(customer.id())
+                .orElseThrow(() -> new AssertionError("client profile not found"));
+        expect("client profile readable", profile.name().equals(customer.name()));
+        services.customers().update(profile.id(), profile.name(), "0999 000 0000");
+        expect("client contact updated",
+                services.customers().findById(profile.id()).orElseThrow().phone().equals("0999 000 0000"));
+        services.customers().update(profile.id(), profile.name(), profile.phone());
+        expect("client history lists the settled order",
+                services.orders().findByCustomer(profile.id()).stream()
+                        .anyMatch(candidate -> candidate.getCode().equals(order.getCode())));
+        expect("open orders counted per client", services.orders().countOpenByCustomer(profile.id()) >= 0);
+
+        Customer throwaway = services.customers().insert("Smoke Test Client", "0900 000 0000");
+        services.customers().archive(throwaway.id());
+        expect("archived client hidden from the directory",
+                services.customers().findAll().stream().noneMatch(c -> c.id() == throwaway.id()));
+
+        // --- staff account editing --------------------------------------------
+        services.users().updateProfile(staff.getId(), "Mika Santos", staff.getRole(), "Evening");
+        expect("shift assignment persists", services.auth().authenticate("staff", "staff123")
+                .orElseThrow().getShift().equals("Evening"));
+        expect("profile update keeps the password", services.auth().authenticate("staff", "staff123").isPresent());
+        services.users().updateProfile(staff.getId(), staff.getFullName(), staff.getRole(), staff.getShift());
+
         System.out.println("revenue today: " + services.reports().revenueToday());
         System.out.println("active orders: " + services.reports().activeOrders());
         System.out.println("audit rows: " + services.reports().recentActivity(50).size());
